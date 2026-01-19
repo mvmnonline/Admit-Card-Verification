@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MVM Nalbari - Entrance Verifier</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <style>
+        :root { --primary: #00008B; --success: #28a745; --danger: #dc3545; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background: #f4f7f6; color: #333; }
+        header { background: var(--primary); color: white; padding: 15px; text-align: center; font-weight: bold; font-size: 1.2rem; }
+        
+        .container { max-width: 600px; margin: auto; padding: 15px; }
+        #reader { width: 100%; border-radius: 15px; overflow: hidden; border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        
+        .result-panel { margin-top: 20px; padding: 20px; border-radius: 12px; display: none; text-align: center; animation: fadeIn 0.3s; }
+        .valid { background: #d4edda; border: 2px solid #c3e6cb; color: #155724; }
+        .invalid { background: #f8d7da; border: 2px solid #f5c6cb; color: #721c24; }
+        
+        .history-section { margin-top: 30px; }
+        .history-card { background: white; padding: 10px 15px; border-radius: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .history-time { font-size: 0.8rem; color: #666; }
+        
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        button.reset-btn { background: #666; color: white; border: none; padding: 10px 20px; border-radius: 5px; margin-top: 10px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<header><i class="fa-solid fa-shield-halved"></i> MVM ENTRANCE VERIFIER</header>
+
+<div class="container">
+    <div id="reader"></div>
+
+    <div id="resultPanel" class="result-panel">
+        <h2 id="statusTitle"></h2>
+        <p id="studentDetails" style="font-size: 1.1rem; margin: 5px 0;"></p>
+        <button class="reset-btn" onclick="resetScanner()">Scan Next Student</button>
+    </div>
+
+    <div class="history-section">
+        <h3><i class="fa-solid fa-clock-rotate-left"></i> Entry History (<span id="count">0</span>)</h3>
+        <div id="historyList"></div>
+    </div>
+</div>
+
+<script>
+    const API = 'https://script.google.com/macros/s/AKfycbzPWWCpUt5GPQ1rEGeAIgt79zJMWCZlXbKx_0PvrXDUHJ5QMY1rlC9hhKS5C4KLNCJz/exec';
+    let history = JSON.parse(localStorage.getItem('scanHistory')) || [];
+
+    // Initialize Scanner
+    const html5QrCode = new Html5Qrcode("reader");
+    const config = { fps: 10, qrbox: { width: 250, height: 150 } };
+
+    function startScanner() {
+        html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess);
+    }
+
+    async function onScanSuccess(decodedText) {
+        // Pause scanner to process
+        await html5QrCode.pause();
+        
+        const panel = document.getElementById('resultPanel');
+        const title = document.getElementById('statusTitle');
+        const info = document.getElementById('studentDetails');
+
+        try {
+            // 1. Base64 Decoding
+            const cleanHash = decodedText.replace(/\*/g, "");
+            const decodedString = atob(cleanHash); 
+            const [sid, dob] = decodedString.split('|');
+
+            // 2. Database Lookup
+            title.innerText = "Verifying...";
+            panel.style.display = "block";
+
+            const response = await fetch(API);
+            const json = await response.json();
+            const student = json.data.find(x => String(x['Student ID']).toUpperCase() === sid.toUpperCase());
+
+            if (student && String(student['Date of Birth']) === dob) {
+                // SUCCESS
+                panel.className = "result-panel valid";
+                title.innerHTML = '<i class="fa-solid fa-circle-check"></i> Verified Entry';
+                info.innerHTML = `<b>${student['Student Name']}</b><br>ID: ${sid} | Class: ${student['Class']}`;
+                
+                addToHistory(student['Student Name'], sid);
+            } else {
+                throw new Error("Invalid Data");
+            }
+        } catch (e) {
+            // FAILURE
+            panel.className = "result-panel invalid";
+            title.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> Verification Failed';
+            info.innerText = "Barcode data does not match school records.";
+        }
+    }
+
+    function addToHistory(name, id) {
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        // Prevent duplicate logs in one session
+        if (!history.some(h => h.id === id)) {
+            history.unshift({ name, id, time });
+            localStorage.setItem('scanHistory', JSON.stringify(history));
+            renderHistory();
+        }
+    }
+
+    function renderHistory() {
+        const list = document.getElementById('historyList');
+        const count = document.getElementById('count');
+        list.innerHTML = history.map(h => `
+            <div class="history-card">
+                <div><strong>${h.name}</strong><br><small>${h.id}</small></div>
+                <div class="history-time">${h.time}</div>
+            </div>
+        `).join('');
+        count.innerText = history.length;
+    }
+
+    function resetScanner() {
+        document.getElementById('resultPanel').style.display = 'none';
+        html5QrCode.resume();
+    }
+
+    // Start on load
+    startScanner();
+    renderHistory();
+</script>
+
+</body>
+</html>
